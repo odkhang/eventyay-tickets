@@ -9,7 +9,9 @@ from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
 from django.views.generic import ListView
 from pytz import timezone
-
+import datetime as dt
+import jwt
+from django.core.exceptions import PermissionDenied
 from pretix.base.forms import SafeSessionWizardView
 from pretix.base.i18n import language
 from pretix.base.models import Event, EventMetaValue, Quota, Organizer
@@ -23,7 +25,10 @@ from pretix.control.views.event import DecoupleMixin, EventSettingsViewMixin
 from pretix.control.views.item import MetaDataEditorMixin
 from pretix.eventyay_common.forms.event import EventCommonSettingsForm
 from pretix.eventyay_common.tasks import send_event_webhook
-
+from rest_framework import views
+import hashlib
+import random
+import string
 
 class EventList(PaginationMixin, ListView):
     model = Event
@@ -61,12 +66,18 @@ class EventList(PaginationMixin, ListView):
             query_set = self.filter_form.filter_qs(query_set)
         return query_set
 
+    def get_plugins(self, pluginList):
+        if pluginList is None:
+            return []
+        return pluginList.split(",")
+
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         ctx['filter_form'] = self.filter_form
 
         quotas = []
         for s in ctx['events']:
+            s.plugins_array = self.get_plugins(s.plugins)
             s.first_quotas = s.first_quotas[:4]
             quotas += list(s.first_quotas)
 
@@ -292,3 +303,56 @@ class EventUpdate(DecoupleMixin, EventSettingsViewMixin, EventPermissionRequired
     @staticmethod
     def reset_timezone(tz, dt):
         return tz.localize(dt.replace(tzinfo=None)) if dt is not None else None
+
+class VideoAccessAuthenticator(views.APIView):
+    def get(self, request, *args, **kwargs):
+        #  Check if the video configuration is fulfilled and the plugin is enabled
+        if ('pretix_venueless' not in self.request.event.get_plugins()
+                or not self.request.event.settings.venueless_url
+                or not self.request.event.settings.venueless_issuer
+                or not self.request.event.settings.venueless_audience
+                or not self.request.event.settings.venueless_secret):
+            raise PermissionDenied(_('Event information is not available or the video plugin is turned off.'))
+
+        # Check if the organizer has permission for the event
+        if not self.request.user.has_event_permission(self.request.organizer,self.request.event,'can_change_event_settings'):
+            raise PermissionDenied(_('You do not have permission to access this video system.'))
+
+        # Generate token and include in url to video system
+        return redirect(self.generate_token_url(request))
+
+    def generate_token_url(self, request):
+        uid_token = self.encode_email(request.user.email)
+        iat = dt.datetime.utcnow()
+        exp = iat + dt.timedelta(days=30)
+
+        payload = {
+            "iss": self.request.event.settings.venueless_issuer,
+            "aud": self.request.event.settings.venueless_audience,
+            "exp": exp,
+            "iat": iat,
+            "uid": uid_token,
+            "traits": list(
+                {
+                    'eventyay-video-event-{}-orgnanizer'.format(request.event.slug),
+                }
+            )
+        }
+
+        token = jwt.encode(
+            payload, self.request.event.settings.venueless_secret, algorithm="HS256"
+        )
+        baseurl = self.request.event.settings.venueless_url
+        return '{}/#token={}'.format(baseurl, token).replace("//#", "/#")
+
+    def encode_email(self, email):
+        hash_object = hashlib.sha256(email.encode())
+        hash_hex = hash_object.hexdigest()
+
+        short_hash = hash_hex[:7]
+
+        characters = string.ascii_letters + string.digits
+        random_suffix = ''.join(random.choice(characters) for _ in range(7 - len(short_hash)))
+
+        final_result =  short_hash + random_suffix
+        return final_result.upper()
