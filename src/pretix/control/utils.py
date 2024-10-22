@@ -1,4 +1,3 @@
-from django.shortcuts import redirect
 from pretix.base.models import Organizer
 from pretix.base.models.organizer import OrganizerBillingModel
 from pretix.base.settings import GlobalSettingsObject
@@ -31,17 +30,18 @@ def get_stripe_publishable_key():
     print('test_publishable_key', test_publishable_key)
     return test_publishable_key
 
+stripe.api_key = get_stripe_secret_key()
+
 
 def create_setup_intent(customer_id):
-    stripe.api_key = get_stripe_secret_key()
-
     try:
-        setup_intent = stripe.SetupIntent.create(
+        stripe_setup_intent = stripe.SetupIntent.create(
             customer=customer_id,
             payment_method_types=["card"],
             usage="off_session",
         )
-        return setup_intent.client_secret
+        OrganizerBillingModel.objects.filter(stripe_customer_id=customer_id).update(stripe_setup_intent_id=stripe_setup_intent.id)
+        return stripe_setup_intent.client_secret
 
     except stripe.error.CardError as e:
         logger.error("Card error creating setup intent: %s", str(e))
@@ -68,6 +68,27 @@ def create_setup_intent(customer_id):
         return messages.error(f"An unexpected error occurred: {e}")
 
 
+def get_setup_intent(stripe_setup_intent_id):
+    try:
+        setup_intent = stripe.SetupIntent.retrieve(stripe_setup_intent_id)
+        return setup_intent
+    except stripe.error.InvalidRequestError as e:
+        logger.error("Invalid request error while retrieving setup intent: %s", str(e))
+        return messages.error(f"Invalid request: {e.user_message}")
+    except stripe.error.AuthenticationError as e:
+        logger.error("Authentication error while retrieving setup intent: %s", str(e))
+        return messages.error(f"Authentication error: {e.user_message}")
+    except stripe.error.APIConnectionError as e:
+        logger.error("API connection error while retrieving setup intent: %s", str(e))
+        return messages.error(f"Network error: {str(e)}")
+    except stripe.error.StripeError as e:
+        logger.error("Stripe error while retrieving setup intent: %s", str(e))
+        return messages.error(f"Stripe error: {e.user_message}")
+    except Exception as e:
+        logger.error("Unexpected error while retrieving setup intent: %s", str(e))
+        return messages.error(f"An unexpected error occurred: {str(e)}")
+
+
 def get_stripe_customer_id(organizer_slug):
     try:
         organizer = Organizer.objects.get(slug=organizer_slug)
@@ -87,8 +108,6 @@ def get_stripe_customer_id(organizer_slug):
 
 
 def create_stripe_customer(email, name):
-    stripe.api_key = get_stripe_secret_key()
-
     try:
         customer = stripe.Customer.create(
             email=email,
@@ -122,14 +141,13 @@ def create_stripe_customer(email, name):
 
 
 def update_payment_info(setup_intent_id, customer_id):
-    stripe.api_key = get_stripe_secret_key()
-
     try:
         setup_intent = retrieve_setup_intent(setup_intent_id)
         if not setup_intent:
             return messages.error("Failed to retrieve setup intent.")
 
         payment_method = setup_intent.payment_method
+        OrganizerBillingModel.objects.filter(stripe_customer_id=customer_id).update(stripe_payment_method_id=payment_method)
         attach_payment_method_to_customer(payment_method, customer_id)
 
         updated_customer_info = stripe.Customer.modify(
@@ -155,9 +173,29 @@ def update_payment_info(setup_intent_id, customer_id):
         logger.error("Unexpected error while updating payment info: %s", str(e))
         return messages.error(f"An unexpected error occurred: {str(e)}")
 
-def update_customer_info(customer_id, email, name):
-    stripe.api_key = get_stripe_secret_key()
+def get_payment_method_info(stripe_customer_id):
+    try:
+        payment_method_id = OrganizerBillingModel.objects.filter(
+            stripe_customer_id=stripe_customer_id).first().stripe_payment_method_id
+        payment_method = stripe.PaymentMethod.retrieve(payment_method_id)
+        return payment_method
+    except stripe.error.InvalidRequestError as e:
+        logger.error("Invalid request error while retrieving payment method info: %s", str(e))
+        return messages.error(f"Invalid request: {e.user_message}")
+    except stripe.error.AuthenticationError as e:
+        logger.error("Authentication error while retrieving payment method info: %s", str(e))
+        return messages.error(f"Authentication error: {e.user_message}")
+    except stripe.error.APIConnectionError as e:
+        logger.error("API connection error while retrieving payment method info: %s", str(e))
+        return messages.error(f"Network error: {str(e)}")
+    except stripe.error.StripeError as e:
+        logger.error("Stripe error while retrieving payment method info: %s", str(e))
+        return messages.error(f"Stripe error: {e.user_message}")
+    except Exception as e:
+        logger.error("Unexpected error while retrieving payment method info: %s", str(e))
+        return messages.error(f"An unexpected error occurred: {str(e)}")
 
+def update_customer_info(customer_id, email, name):
     try:
         updated_customer_info = stripe.Customer.modify(
             customer_id,
@@ -183,8 +221,6 @@ def update_customer_info(customer_id, email, name):
 
 
 def attach_payment_method_to_customer(payment_method_id, customer_id):
-    stripe.api_key = get_stripe_secret_key()
-
     try:
         attached_payment_method = stripe.PaymentMethod.attach(
             payment_method_id,
@@ -209,8 +245,6 @@ def attach_payment_method_to_customer(payment_method_id, customer_id):
 
 
 def retrieve_setup_intent(setup_intent_id):
-    stripe.api_key = get_stripe_secret_key()
-
     try:
         setup_intent = stripe.SetupIntent.retrieve(setup_intent_id)
         return setup_intent

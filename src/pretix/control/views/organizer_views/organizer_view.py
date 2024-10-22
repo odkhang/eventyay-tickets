@@ -29,7 +29,7 @@ from pretix.control.permissions import (
 )
 from pretix.control.signals import nav_organizer
 from pretix.control.utils import create_stripe_customer, get_stripe_customer_id, create_setup_intent, \
-    get_stripe_publishable_key, update_payment_info
+    get_stripe_publishable_key, update_payment_info, get_setup_intent, get_payment_method_info
 from pretix.control.views import PaginationMixin
 from pretix.presale.style import regenerate_organizer_css
 from rest_framework.response import Response
@@ -401,11 +401,20 @@ def setup_intent(request, organizer):
                 "error": "No Stripe customer ID found."
             }, status=404)
 
-        client_secret = create_setup_intent(stripe_customer_id)
+        billing_setting_info =  OrganizerBillingModel.objects.filter(stripe_customer_id=stripe_customer_id).first()
+        payment_method_info = get_payment_method_info(stripe_customer_id)
+
+        if billing_setting_info and billing_setting_info.stripe_setup_intent_id:
+            client_secret = get_setup_intent(billing_setting_info.stripe_setup_intent_id).client_secret
+        else:
+            client_secret = create_setup_intent(stripe_customer_id)
 
         return Response({
             "client_secret": client_secret,
-            "stripe_public_key": get_stripe_publishable_key()
+            "stripe_public_key": get_stripe_publishable_key(),
+            "payment_method_info": payment_method_info if payment_method_info else None,
+            "customer_id": stripe_customer_id if stripe_customer_id else None,
+            "setup_intent_id": billing_setting_info.stripe_setup_intent_id if billing_setting_info else None
         })
 
     except Exception as e:
