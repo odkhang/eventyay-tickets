@@ -12,32 +12,45 @@ from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
 from django.views import View
 from django.views.generic import (
-    CreateView, DetailView, FormView, ListView, UpdateView,
+    CreateView,
+    DetailView,
+    FormView,
+    ListView,
+    UpdateView,
 )
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
 
 from pretix.base.models.event import Event, EventMetaValue
-from pretix.base.models.organizer import Organizer, Team, OrganizerBillingModel
+from pretix.base.models.organizer import Organizer, OrganizerBillingModel, Team
 from pretix.base.settings import SETTINGS_AFFECTING_CSS
 from pretix.control.forms.filter import EventFilterForm, OrganizerFilterForm
 from pretix.control.forms.organizer import OrganizerFooterLink
 from pretix.control.forms.organizer_forms import (
-    OrganizerDeleteForm, OrganizerForm, OrganizerSettingsForm,
+    OrganizerDeleteForm,
+    OrganizerForm,
+    OrganizerSettingsForm,
     OrganizerUpdateForm,
 )
 from pretix.control.permissions import (
-    AdministratorPermissionRequiredMixin, OrganizerPermissionRequiredMixin,
+    AdministratorPermissionRequiredMixin,
+    OrganizerPermissionRequiredMixin,
 )
 from pretix.control.signals import nav_organizer
-from pretix.control.utils import create_stripe_customer, get_stripe_customer_id, create_setup_intent, \
-    get_stripe_publishable_key, update_payment_info, get_setup_intent, get_payment_method_info
+from pretix.control.utils import (
+    create_setup_intent,
+    create_stripe_customer,
+    get_payment_method_info,
+    get_setup_intent,
+    get_stripe_customer_id,
+    get_stripe_publishable_key,
+    update_payment_info,
+)
 from pretix.control.views import PaginationMixin
 from pretix.presale.style import regenerate_organizer_css
-from rest_framework.response import Response
-from rest_framework.decorators import api_view
 
-from .organizer_detail_view_mixin import OrganizerDetailViewMixin
 from ...forms.organizer_forms.organizer_form import BillingSettingsForm
-
+from .organizer_detail_view_mixin import OrganizerDetailViewMixin
 
 logger = logging.getLogger(__name__)
 
@@ -346,6 +359,7 @@ class OrganizerList(PaginationMixin, ListView):
     def filter_form(self):
         return OrganizerFilterForm(data=self.request.GET, request=self.request)
 
+
 class BillingSettings(FormView, OrganizerPermissionRequiredMixin):
     model = OrganizerBillingModel
     form_class = BillingSettingsForm
@@ -364,6 +378,19 @@ class BillingSettings(FormView, OrganizerPermissionRequiredMixin):
         kwargs = super().get_form_kwargs()
         kwargs["organizer"] = self.request.organizer
         return kwargs
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+
+        billing_settings = OrganizerBillingModel.objects.filter(
+            organizer_id=self.request.organizer.id
+        ).first()
+
+        if billing_settings and billing_settings.stripe_customer_id:
+            ctx["is_general_information"] = True
+        else:
+            ctx["is_general_information"] = False
+        return ctx
 
     @transaction.atomic
     def post(self, request, *args, **kwargs):
@@ -389,65 +416,35 @@ class BillingSettings(FormView, OrganizerPermissionRequiredMixin):
         return self.form_invalid(form)
 
 
-
-@api_view(['GET'])
+@api_view(["GET"])
 def setup_intent(request, organizer):
     try:
         stripe_customer_id = get_stripe_customer_id(organizer)
-
-        if not stripe_customer_id:
-            logger.error("No Stripe customer ID found for organizer: %s", organizer)
-            return Response({
-                "error": "No Stripe customer ID found."
-            }, status=404)
-
-        billing_setting_info =  OrganizerBillingModel.objects.filter(stripe_customer_id=stripe_customer_id).first()
         payment_method_info = get_payment_method_info(stripe_customer_id)
-
-        if billing_setting_info and billing_setting_info.stripe_setup_intent_id:
-            client_secret = get_setup_intent(billing_setting_info.stripe_setup_intent_id).client_secret
-        else:
-            client_secret = create_setup_intent(stripe_customer_id)
-
-        return Response({
-            "client_secret": client_secret,
-            "stripe_public_key": get_stripe_publishable_key(),
-            "payment_method_info": payment_method_info if payment_method_info else None,
-            "customer_id": stripe_customer_id if stripe_customer_id else None,
-            "setup_intent_id": billing_setting_info.stripe_setup_intent_id if billing_setting_info else None
-        })
-
+        client_secret = create_setup_intent(stripe_customer_id)
+        return Response(
+            {
+                "client_secret": client_secret,
+                "stripe_public_key": get_stripe_publishable_key(),
+                "payment_method_info": payment_method_info,
+            }
+        )
     except Exception as e:
         logger.error("Unexpected error creating setup intent: %s", str(e))
-        return Response({
-            "error": "An unexpected error occurred."
-        }, status=500)
+        return Response({"error": "An unexpected error occurred."}, status=500)
 
-@api_view(['POST'])
+
+@api_view(["POST"])
 def save_payment_information(request, organizer):
     setup_intent_id = request.data.get("setup_intent_id")
-
     try:
         stripe_customer_id = get_stripe_customer_id(organizer)
-
-        customer_information = update_payment_info(setup_intent_id, stripe_customer_id)
-
-        return Response({
-            "success": True,
-            "customer": customer_information
-        })
-
+        update_payment_info(setup_intent_id, stripe_customer_id)
+        return Response(
+            {
+                "success": True,
+            }
+        )
     except Exception as e:
         logger.error("Unexpected error updating payment information: %s", str(e))
-        return Response({
-            "error": "An unexpected error occurred."
-        }, status=500)
-
-
-
-
-
-
-
-
-
+        return Response({"error": "An unexpected error occurred."}, status=500)
