@@ -178,8 +178,10 @@ class BillingSettingsForm(forms.ModelForm):
             return billing_settings
         else:
             if commit:
-                stripe_customer = create_stripe_customer(email=self.cleaned_data.get("primary_contact_email"),
-                                                         name=self.cleaned_data.get("primary_contact_name"))
+                stripe_customer = create_stripe_customer(
+                    email=self.cleaned_data.get("primary_contact_email"),
+                    name=self.cleaned_data.get("primary_contact_name"),
+                )
                 instance.stripe_customer_id = stripe_customer.id
                 instance.save()
             return instance
