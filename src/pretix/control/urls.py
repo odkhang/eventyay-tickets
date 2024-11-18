@@ -332,6 +332,8 @@ urlpatterns = [
     url(r'^admin/', include([
         url(r'^$', admin.AdminDashboard.as_view(), name='admin.dashboard'),
         url(r'^organizers/$', admin.OrganizerList.as_view(), name='admin.organizers'),
+        url(r'^invoices/$', admin.InvoiceList.as_view(), name='admin.invoices'),
+        url(r'^invoice/(?P<id>[^/]+)', admin.InvoiceDetail.as_view(), name='admin.invoice.detail'),
         url(r'^sudo/(?P<id>\d+)/$', user.EditStaffSession.as_view(), name='admin.user.sudo.edit'),
         url(r'^sudo/sessions/$', user.StaffSessionList.as_view(), name='admin.user.sudo.list'),
         url(r'^users/$', users.UserListView.as_view(), name='admin.users'),

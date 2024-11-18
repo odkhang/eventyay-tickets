@@ -1,0 +1,11 @@
+{% load i18n %}
+{% load bootstrap3 %}
+{% if invoice.status == "n" %}
+        <span class="label label-warning {{ class }}">{% trans "Pending" %}</span>
+{% elif invoice.status == "p" %}
+        <span class="label label-success {{ class }}">{% trans "Paid" %}</span>
+{% elif invoice.status == "e" %}
+    <span class="label label-danger {{ class }}">{% trans "Expired" %}</span>
+{% elif invoice.status == "c" %}
+    <span class="label label-danger {{ class }}">{% trans "Canceled" %}</span>
+{% endif %}

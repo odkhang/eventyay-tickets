@@ -1,0 +1,80 @@
+{% extends "pretixcontrol/admin/base.html" %}
+{% load i18n %}
+{% load bootstrap3 %}
+{% load urlreplace %}
+{% load eventurl %}
+{% load money %}
+
+{% block title %}{% trans "Invoices" %}{% endblock %}
+{% block content %}
+    <h1>{% trans "Invoices" %}</h1>
+    <div class="panel panel-default">
+        <div class="panel-heading">
+            <h3 class="panel-title">{% trans "Filter" %}</h3>
+        </div>
+        <div class="panel-body">
+            <form class="" action="" method="get">
+                <div class="row filter-form">
+                    <div class="col-md-3 col-sm-6 col-xs-12">
+{#                        {% bootstrap_field filter_form.query layout='inline' %}#}
+                    </div>
+                    <div class="col-md-3 col-sm-6 col-xs-12">
+{#                        {% bootstrap_field filter_form.status layout='inline' %}#}
+                    </div>
+                    <div class="col-md-3 col-sm-6 col-xs-12">
+{#                        {% bootstrap_field filter_form.organizer layout='inline' %}#}
+                    </div>
+                    {% for mf in meta_fields %}
+                        <div class="col-md-3 col-sm-6 col-xs-12">
+                            {% bootstrap_field mf layout='inline' %}
+                        </div>
+                    {% endfor %}
+                </div>
+                <div class="text-right">
+                    <button class="btn btn-primary" type="submit">
+                        <span class="fa fa-filter"></span>
+                        <span class="hidden-md">{% trans "Filter" %}</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-condensed table-hover table-quotas">
+            <thead>
+            <tr>
+                <th>{% trans "Id" %}</th>
+                <th>{% trans "Organizer" %}</th>
+                <th>{% trans "Event" %}</th>
+                <th>{% trans "Total revenue" %}</th>
+                <th>{% trans "Ticket fee" %}</th>
+                <th>{% trans "Monthly_bill" %}</th>
+                <th>{% trans "Status" %}</th>
+                <th></th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for invoice in invoices %}
+                <tr>
+                    <td data-label="{% trans 'Invoice code' %}">
+                        <strong>{{ invoice.id }}</strong>
+                    </td>
+                    <td data-label="{% trans 'Organizer' %}">{{ invoice.organizer.name }}</td>
+                    <td data-label="{% trans 'Event' %}">{{ invoice.event.name }}</td>
+                    <td data-label="{% trans 'Amount' %}">{{ invoice.amount|money:invoice.currency }}</td>
+                    <td data-label="{% trans 'Ticket fee' %}">{{ invoice.ticket_fee|money:invoice.currency }}</td>
+                    <td data-label="{% trans 'Monthly_bill' %}">{{ invoice.monthly_bill|date:"F Y" }}</td>
+                    <td data-label="{% trans 'Status' %}">{% include "pretixcontrol/admin/fragment_invoice_status.html" with invoice=invoice %}</td>
+                    <td class="text-right flip" data-label="{% trans 'Details' %}">
+                        <a href="{% url 'control:admin.invoice.detail' id=invoice.id %}" target="_blank"
+                           class="btn btn-default">
+                            {% trans "Details" %}
+                        </a>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% include "pretixcontrol/pagination.html" %}
+{% endblock %}
